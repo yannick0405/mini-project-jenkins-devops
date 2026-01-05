@@ -4,7 +4,7 @@ pipeline {
     environment {
         // Credentials Jenkins
         DOCKERHUB_CREDS = credentials('DOCKERHUB-CREDS')  // ID de ton credential DockerHub
-        SLACK_TOKEN = credentials('sonar-token')         // ID de ton credential Slack
+        SLACK_TOKEN = credentials('slack-webhook')         // ID de ton credential Slack
 
         // Variables du projet
         IMAGE_NAME = "paymybuddy"

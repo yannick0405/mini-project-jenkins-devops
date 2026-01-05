@@ -4,8 +4,7 @@ pipeline {
     environment {
         // DockerHub
         DOCKERHUB_CREDS = credentials('dockerhub-cred')
-        DOCKER_USER = "${yannick0405}"
-        DOCKER_PASS = "${Yannick@dockerhub123}"
+        
 
         IMAGE_NAME = "paymybuddy"
         IMAGE_TAG  = "${env.BUILD_NUMBER}"

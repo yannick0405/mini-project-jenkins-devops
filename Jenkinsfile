@@ -3,14 +3,14 @@ pipeline {
 
     environment {
         // DockerHub
-        DOCKERHUB_CREDS = credentials('dockerhub-cred')
+        DOCKERHUB_CREDS = credentials('DOCKERHUB-CREDS')
         
 
         IMAGE_NAME = "paymybuddy"
         IMAGE_TAG  = "${env.BUILD_NUMBER}"
 
         // SonarCloud
-        SONAR_TOKEN = credentials('sonar-token')
+        SONAR_TOKEN = credentials('slack-webhook')
         SONAR_ORG   = "yannick0405"
         SONAR_PROJECT_KEY = "yannick0405_PayMyBuddy"
 

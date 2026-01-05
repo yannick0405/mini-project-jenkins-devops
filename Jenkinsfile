@@ -2,68 +2,60 @@ pipeline {
     agent none
 
     environment {
-        // DockerHub
-        DOCKERHUB_CREDS = credentials('DOCKERHUB-CREDS')
-        
+        // Credentials Jenkins
+        DOCKERHUB_CREDS = credentials('DOCKERHUB_CREDS')  // ID de ton credential DockerHub
+        SLACK_TOKEN = credentials('sonar-token')         // ID de ton credential Slack
 
+        // Variables du projet
         IMAGE_NAME = "paymybuddy"
-        IMAGE_TAG  = "${env.BUILD_NUMBER}"
+        IMAGE_TAG = "v1"
+        PORT_EXPOSED = "80"
 
-        // SonarCloud
-        SONAR_TOKEN = credentials('slack-webhook')
-        SONAR_ORG   = "yannick0405"
-        SONAR_PROJECT_KEY = "yannick0405_PayMyBuddy"
-
-        // Deployment
-        STAGING_HOST = "44.211.85.128"
-        PROD_HOST    = "98.92.95.208"
-
-        APP_PORT = "8080"
+        // Hôtes de déploiement
+        HOSTNAME_DEPLOY_STAGING = "54.175.193.5"
+        HOSTNAME_DEPLOY_PROD = "54.226.252.171"
     }
 
     stages {
 
-        stage('Checkout') {
+        stage('Checkout source') {
             agent any
             steps {
-                git branch: 'main',
-                    url: 'https://github.com/yannick0405/PayMyBuddy.git'
+                checkout([$class: 'GitSCM',
+                    branches: [[name: '*/main']],
+                    userRemoteConfigs: [[url: 'https://github.com/yannick0405/PayMyBuddy.git']]
+                ])
             }
         }
 
-        stage('Tests') {
-            agent {
-                docker {
-                    image 'maven:3.9.6-eclipse-temurin-17'
-                }
-            }
+        stage('Build JAR with Maven Wrapper') {
+            agent any
             steps {
-                sh 'mvn clean test'
-            }
-        }
-
-        stage('SonarCloud Analysis') {
-            agent {
-                docker {
-                    image 'maven:3.9.6-eclipse-temurin-17'
-                }
-            }
-            steps {
-                sh """
-                  mvn sonar:sonar \
-                  -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
-                  -Dsonar.organization=${SONAR_ORG} \
-                  -Dsonar.host.url=https://sonarcloud.io \
-                  -Dsonar.login=${SONAR_TOKEN}
-                """
+                sh './mvnw clean package -DskipTests'
             }
         }
 
         stage('Build Docker Image') {
             agent any
             steps {
+                script {
+                    sh """
+                        docker build -t ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG} .
+                    """
+                }
+            }
+        }
+
+        stage('Run Container Locally for Test') {
+            agent any
+            steps {
                 sh """
-                  docker build -t ${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG} .
+                    docker rm -f ${IMAGE_NAME} || true
+                    docker run -d --name ${IMAGE_NAME} -p ${PORT_EXPOSED}:80 ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG}
+                    sleep 5
+                    curl -f http://localhost:${PORT_EXPOSED} || (echo "App test failed" && exit 1)
+                    docker stop ${IMAGE_NAME}
+                    docker rm ${IMAGE_NAME}
                 """
             }
         }
@@ -71,70 +63,72 @@ pipeline {
         stage('Push Docker Image') {
             agent any
             steps {
-                sh """
-                  echo ${DOCKER_PASS} | docker login -u ${DOCKER_USER} --password-stdin
-                  docker push ${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG}
-                """
+                script {
+                    sh """
+                        echo ${DOCKERHUB_CREDS_PSW} | docker login -u ${DOCKERHUB_CREDS_USR} --password-stdin
+                        docker push ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG}
+                    """
+                }
             }
         }
 
-        stage('Deploy Staging') {
-            when {
-                branch 'main'
-            }
+        stage('Deploy to Staging') {
             agent any
             steps {
                 sshagent(credentials: ['SSH_AUTH_SERVER']) {
                     sh """
-                      ssh -o StrictHostKeyChecking=no ubuntu@${STAGING_HOST} '
-                      docker login -u ${DOCKER_USER} -p ${DOCKER_PASS} &&
-                      docker pull ${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG} &&
-                      docker rm -f paymybuddy || true &&
-                      docker run -d -p ${APP_PORT}:8080 --name paymybuddy ${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG}
-                      '
+                        ssh -o StrictHostKeyChecking=no ubuntu@${HOSTNAME_DEPLOY_STAGING} '
+                            docker login -u ${DOCKERHUB_CREDS_USR} -p ${DOCKERHUB_CREDS_PSW} &&
+                            docker pull ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG} &&
+                            docker rm -f ${IMAGE_NAME} || true &&
+                            docker run -d -p 80:80 --name ${IMAGE_NAME} ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG}
+                        '
                     """
                 }
             }
         }
 
         stage('Test Staging') {
-            when {
-                branch 'main'
-            }
             agent any
             steps {
-                sh "curl http://${STAGING_HOST}:${APP_PORT}/actuator/health"
+                sh """
+                    curl -f http://${HOSTNAME_DEPLOY_STAGING} || (echo "Staging test failed" && exit 1)
+                """
             }
         }
 
-        stage('Deploy Production') {
-            when {
-                branch 'main'
-            }
+        stage('Deploy to Production') {
             agent any
             steps {
                 sshagent(credentials: ['SSH_AUTH_SERVER']) {
                     sh """
-                      ssh -o StrictHostKeyChecking=no ubuntu@${PROD_HOST} '
-                      docker login -u ${DOCKER_USER} -p ${DOCKER_PASS} &&
-                      docker pull ${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG} &&
-                      docker rm -f paymybuddy || true &&
-                      docker run -d -p ${APP_PORT}:8080 --name paymybuddy ${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG}
-                      '
+                        ssh -o StrictHostKeyChecking=no ubuntu@${HOSTNAME_DEPLOY_PROD} '
+                            docker login -u ${DOCKERHUB_CREDS_USR} -p ${DOCKERHUB_CREDS_PSW} &&
+                            docker pull ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG} &&
+                            docker rm -f ${IMAGE_NAME} || true &&
+                            docker run -d -p 80:80 --name ${IMAGE_NAME} ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG}
+                        '
                     """
                 }
+            }
+        }
+
+        stage('Test Production') {
+            agent any
+            steps {
+                sh """
+                    curl -f http://${HOSTNAME_DEPLOY_PROD} || (echo "Production test failed" && exit 1)
+                """
             }
         }
     }
 
     post {
         success {
-            slackSend(channel: '#jenkins',
-                      message: "✅ PayMyBuddy pipeline SUCCESS – Build ${BUILD_NUMBER}")
+            slackSend(channel: '#jenkins-notification2026', color: 'good', message: "Pipeline PayMyBuddy réussie ✅", tokenCredentialId: 'slack-webhook')
         }
         failure {
-            slackSend(channel: '#jenkins',
-                      message: "❌ PayMyBuddy pipeline FAILED – Build ${BUILD_NUMBER}")
+            slackSend(channel: '#jenkins-notification2026', color: 'danger', message: "Pipeline PayMyBuddy échouée ❌", tokenCredentialId: 'slack-webhook')
         }
     }
 }

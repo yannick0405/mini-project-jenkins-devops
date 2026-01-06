@@ -1,34 +1,37 @@
 pipeline {
-    agent none
+    agent any
 
     environment {
+        // Credentials
         DOCKERHUB_CREDS = credentials('DOCKERHUB-CREDS')
-        SLACK_TOKEN = credentials('slack-webhook')
+        SLACK_TOKEN     = credentials('slack-webhook')
 
+        // Image Docker
         IMAGE_NAME = "paymybuddy"
-        IMAGE_TAG = "v1"
+        IMAGE_TAG  = "v1"
         PORT_EXPOSED = "80"
 
+        // Serveurs
         HOSTNAME_DEPLOY_STAGING = "54.175.193.5"
-        HOSTNAME_DEPLOY_PROD = "54.226.252.171"
+        HOSTNAME_DEPLOY_PROD    = "54.226.252.171"
     }
 
     stages {
 
-        stage('Checkout source') {
-    agent any
-    steps {
-        checkout scm
+        stage('Checkout sources') {
+            steps {
+                // Repo Jenkinsfile
+                checkout scm
 
-        dir('paymybuddy') {
-            git branch: 'main',
-                url: 'https://github.com/yannick0405/PayMyBuddy.git'
+                // Repo application
+                dir('paymybuddy') {
+                    git branch: 'main',
+                        url: 'https://github.com/yannick0405/PayMyBuddy.git'
+                }
+            }
         }
-    }
-}
 
         stage('Build JAR with Maven Wrapper') {
-            agent any
             steps {
                 dir('paymybuddy') {
                     sh '''
@@ -40,90 +43,96 @@ pipeline {
         }
 
         stage('Build Docker Image') {
-            agent any
             steps {
                 dir('paymybuddy') {
-                    sh """
+                    sh '''
                         docker build -t ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG} .
-                    """
+                    '''
                 }
             }
         }
 
         stage('Run Container Locally for Test') {
-            agent any
             steps {
-                sh """
+                sh '''
                     docker rm -f ${IMAGE_NAME} || true
-                    docker run -d --name ${IMAGE_NAME} -p ${PORT_EXPOSED}:80 ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG}
+                    docker run -d --name ${IMAGE_NAME} -p ${PORT_EXPOSED}:80 \
+                        ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG}
+
                     sleep 5
-                    curl -f http://localhost:${PORT_EXPOSED} || exit 1
-                    docker stop ${IMAGE_NAME}
-                    docker rm ${IMAGE_NAME}
-                """
+                    curl -f http://localhost:${PORT_EXPOSED}
+                    docker rm -f ${IMAGE_NAME}
+                '''
             }
         }
 
         stage('Push Docker Image') {
-            agent any
             steps {
-                sh """
-                    echo ${DOCKERHUB_CREDS_PSW} | docker login -u ${DOCKERHUB_CREDS_USR} --password-stdin
+                sh '''
+                    echo ${DOCKERHUB_CREDS_PSW} | docker login \
+                        -u ${DOCKERHUB_CREDS_USR} --password-stdin
+
                     docker push ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG}
-                """
+                '''
             }
         }
 
         stage('Deploy to Staging') {
-            agent any
             steps {
                 sshagent(credentials: ['SSH_AUTH_SERVER']) {
-                    sh """
-                        ssh -o StrictHostKeyChecking=no ubuntu@${HOSTNAME_DEPLOY_STAGING} '
+                    sh '''
+                        ssh -o StrictHostKeyChecking=no ubuntu@${HOSTNAME_DEPLOY_STAGING} "
                             docker login -u ${DOCKERHUB_CREDS_USR} -p ${DOCKERHUB_CREDS_PSW} &&
                             docker pull ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG} &&
                             docker rm -f ${IMAGE_NAME} || true &&
-                            docker run -d -p 80:80 --name ${IMAGE_NAME} ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG}
-                        '
-                    """
+                            docker run -d -p 80:80 --name ${IMAGE_NAME} \
+                                ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG}
+                        "
+                    '''
                 }
             }
         }
 
         stage('Test Staging') {
-            agent any
             steps {
-                sh "curl -f http://${HOSTNAME_DEPLOY_STAGING}"
+                sh '''
+                    curl -f http://${HOSTNAME_DEPLOY_STAGING}
+                '''
             }
         }
 
         stage('Deploy to Production') {
-            agent any
             steps {
                 sshagent(credentials: ['SSH_AUTH_SERVER']) {
-                    sh """
-                        ssh -o StrictHostKeyChecking=no ubuntu@${HOSTNAME_DEPLOY_PROD} '
+                    sh '''
+                        ssh -o StrictHostKeyChecking=no ubuntu@${HOSTNAME_DEPLOY_PROD} "
                             docker login -u ${DOCKERHUB_CREDS_USR} -p ${DOCKERHUB_CREDS_PSW} &&
                             docker pull ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG} &&
                             docker rm -f ${IMAGE_NAME} || true &&
-                            docker run -d -p 80:80 --name ${IMAGE_NAME} ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG}
-                        '
-                    """
+                            docker run -d -p 80:80 --name ${IMAGE_NAME} \
+                                ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG}
+                        "
+                    '''
                 }
             }
         }
 
         stage('Test Production') {
-            agent any
             steps {
-                sh "curl -f http://${HOSTNAME_DEPLOY_PROD}"
+                sh '''
+                    curl -f http://${HOSTNAME_DEPLOY_PROD}
+                '''
             }
         }
     }
 
     post {
+        success {
+            echo "Pipeline succeeded"
+        }
+
         failure {
-            echo "Build failed"
+            echo "Pipeline failed"
         }
     }
 }

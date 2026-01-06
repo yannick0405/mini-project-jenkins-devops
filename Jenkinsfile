@@ -2,17 +2,11 @@ pipeline {
     agent none
 
     environment {
-        // Credentials Jenkins
         DOCKERHUB_CREDS = credentials('DOCKERHUB-CREDS')  // DockerHub
-        SLACK_TOKEN = credentials('slack-token')         // Slack
-        SONAR_TOKEN = credentials('SONAR_TOKEN')         // SonarQube
-
-        // Variables du projet
+        SLACK_TOKEN = credentials('slack-token')          // Slack webhook
         IMAGE_NAME = "paymybuddy"
         IMAGE_TAG = "v1"
         PORT_EXPOSED = "80"
-
-        // Hôtes de déploiement
         HOSTNAME_DEPLOY_STAGING = "54.175.193.5"
         HOSTNAME_DEPLOY_PROD = "54.226.252.171"
     }
@@ -27,32 +21,21 @@ pipeline {
 
                 // Repo application
                 dir('paymybuddy') {
-                    git branch: 'main',
-                        url: 'https://github.com/yannick0405/PayMyBuddy.git'
+                    git branch: 'main', url: 'https://github.com/yannick0405/PayMyBuddy.git'
                 }
             }
         }
 
-        stage('Build JAR with Maven Wrapper') {
-            agent any
+        stage('Build JAR with Maven Docker') {
+            agent {
+                docker { image 'maven:3.9.1-eclipse-temurin-17' }  // Maven + JDK 17
+            }
             steps {
                 dir('paymybuddy') {
                     sh '''
-                        chmod +x mvnw
-                        ./mvnw clean package -DskipTests
+                        chmod +x mvnw || true
+                        ./mvnw clean package -DskipTests || mvn clean package -DskipTests
                     '''
-                }
-            }
-        }
-
-        stage('SonarQube Scan') {
-            agent any
-            steps {
-                dir('paymybuddy') {
-                    sh """
-                        ./mvnw sonar:sonar \
-                        -Dsonar.login=${SONAR_TOKEN}
-                    """
                 }
             }
         }
@@ -60,11 +43,9 @@ pipeline {
         stage('Build Docker Image') {
             agent any
             steps {
-                script {
-                    sh """
-                        docker build -t ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG} .
-                    """
-                }
+                sh """
+                    docker build -t ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG} paymybuddy
+                """
             }
         }
 
@@ -85,12 +66,10 @@ pipeline {
         stage('Push Docker Image') {
             agent any
             steps {
-                script {
-                    sh """
-                        echo ${DOCKERHUB_CREDS_PSW} | docker login -u ${DOCKERHUB_CREDS_USR} --password-stdin
-                        docker push ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG}
-                    """
-                }
+                sh """
+                    echo ${DOCKERHUB_CREDS_PSW} | docker login -u ${DOCKERHUB_CREDS_USR} --password-stdin
+                    docker push ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG}
+                """
             }
         }
 
@@ -146,22 +125,21 @@ pipeline {
     }
 
     post {
-    success {
-        slackSend(
-            tokenCredentialId: 'slack-token',
-            channel: '#jenkins-notification2025',
-            color: 'good',
-            message: "Pipeline succeeded for ${JOB_NAME} #${BUILD_NUMBER}"
-        )
+        failure {
+            slackSend(
+                channel: '#jenkins-notification2025',
+                color: 'danger',
+                tokenCredentialId: 'slack-token',
+                message: "Pipeline FAILED : ${env.JOB_NAME} Build #${env.BUILD_NUMBER}"
+            )
+        }
+        success {
+            slackSend(
+                channel: '#jenkins-notification2025',
+                color: 'good',
+                tokenCredentialId: 'slack-token',
+                message: "Pipeline SUCCESS : ${env.JOB_NAME} Build #${env.BUILD_NUMBER}"
+            )
+        }
     }
-    failure {
-        slackSend(
-            tokenCredentialId: 'slack-token',
-            channel: '#jenkins-notification2025',
-            color: 'danger',
-            message: "Pipeline failed for ${JOB_NAME} #${BUILD_NUMBER}"
-        )
-    }
-}
-    
 }

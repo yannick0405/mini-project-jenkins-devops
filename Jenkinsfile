@@ -1,24 +1,26 @@
 pipeline {
-    agent any
+    agent none
 
     environment {
-        // Credentials
-        DOCKERHUB_CREDS = credentials('DOCKERHUB-CREDS')
-        SLACK_TOKEN     = credentials('slack-webhook')
+        // Credentials Jenkins
+        DOCKERHUB_CREDS = credentials('DOCKERHUB-CREDS')  // DockerHub
+        SLACK_TOKEN = credentials('slack-token')         // Slack
+        SONAR_TOKEN = credentials('SONAR_TOKEN')         // SonarQube
 
-        // Image Docker
+        // Variables du projet
         IMAGE_NAME = "paymybuddy"
-        IMAGE_TAG  = "v1"
+        IMAGE_TAG = "v1"
         PORT_EXPOSED = "80"
 
-        // Serveurs
+        // Hôtes de déploiement
         HOSTNAME_DEPLOY_STAGING = "54.175.193.5"
-        HOSTNAME_DEPLOY_PROD    = "54.226.252.171"
+        HOSTNAME_DEPLOY_PROD = "54.226.252.171"
     }
 
     stages {
 
-        stage('Checkout sources') {
+        stage('Checkout source') {
+            agent any
             steps {
                 // Repo Jenkinsfile
                 checkout scm
@@ -32,6 +34,7 @@ pipeline {
         }
 
         stage('Build JAR with Maven Wrapper') {
+            agent any
             steps {
                 dir('paymybuddy') {
                     sh '''
@@ -42,97 +45,122 @@ pipeline {
             }
         }
 
-        stage('Build Docker Image') {
+        stage('SonarQube Scan') {
+            agent any
             steps {
                 dir('paymybuddy') {
-                    sh '''
+                    sh """
+                        ./mvnw sonar:sonar \
+                        -Dsonar.login=${SONAR_TOKEN}
+                    """
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            agent any
+            steps {
+                script {
+                    sh """
                         docker build -t ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG} .
-                    '''
+                    """
                 }
             }
         }
 
         stage('Run Container Locally for Test') {
+            agent any
             steps {
-                sh '''
+                sh """
                     docker rm -f ${IMAGE_NAME} || true
-                    docker run -d --name ${IMAGE_NAME} -p ${PORT_EXPOSED}:80 \
-                        ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG}
-
+                    docker run -d --name ${IMAGE_NAME} -p ${PORT_EXPOSED}:80 ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG}
                     sleep 5
-                    curl -f http://localhost:${PORT_EXPOSED}
-                    docker rm -f ${IMAGE_NAME}
-                '''
+                    curl -f http://localhost:${PORT_EXPOSED} || (echo "App test failed" && exit 1)
+                    docker stop ${IMAGE_NAME}
+                    docker rm ${IMAGE_NAME}
+                """
             }
         }
 
         stage('Push Docker Image') {
+            agent any
             steps {
-                sh '''
-                    echo ${DOCKERHUB_CREDS_PSW} | docker login \
-                        -u ${DOCKERHUB_CREDS_USR} --password-stdin
-
-                    docker push ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG}
-                '''
+                script {
+                    sh """
+                        echo ${DOCKERHUB_CREDS_PSW} | docker login -u ${DOCKERHUB_CREDS_USR} --password-stdin
+                        docker push ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG}
+                    """
+                }
             }
         }
 
         stage('Deploy to Staging') {
+            agent any
             steps {
                 sshagent(credentials: ['SSH_AUTH_SERVER']) {
-                    sh '''
-                        ssh -o StrictHostKeyChecking=no ubuntu@${HOSTNAME_DEPLOY_STAGING} "
+                    sh """
+                        ssh -o StrictHostKeyChecking=no ubuntu@${HOSTNAME_DEPLOY_STAGING} '
                             docker login -u ${DOCKERHUB_CREDS_USR} -p ${DOCKERHUB_CREDS_PSW} &&
                             docker pull ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG} &&
                             docker rm -f ${IMAGE_NAME} || true &&
-                            docker run -d -p 80:80 --name ${IMAGE_NAME} \
-                                ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG}
-                        "
-                    '''
+                            docker run -d -p 80:80 --name ${IMAGE_NAME} ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG}
+                        '
+                    """
                 }
             }
         }
 
         stage('Test Staging') {
+            agent any
             steps {
-                sh '''
-                    curl -f http://${HOSTNAME_DEPLOY_STAGING}
-                '''
+                sh """
+                    curl -f http://${HOSTNAME_DEPLOY_STAGING} || (echo "Staging test failed" && exit 1)
+                """
             }
         }
 
         stage('Deploy to Production') {
+            agent any
             steps {
                 sshagent(credentials: ['SSH_AUTH_SERVER']) {
-                    sh '''
-                        ssh -o StrictHostKeyChecking=no ubuntu@${HOSTNAME_DEPLOY_PROD} "
+                    sh """
+                        ssh -o StrictHostKeyChecking=no ubuntu@${HOSTNAME_DEPLOY_PROD} '
                             docker login -u ${DOCKERHUB_CREDS_USR} -p ${DOCKERHUB_CREDS_PSW} &&
                             docker pull ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG} &&
                             docker rm -f ${IMAGE_NAME} || true &&
-                            docker run -d -p 80:80 --name ${IMAGE_NAME} \
-                                ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG}
-                        "
-                    '''
+                            docker run -d -p 80:80 --name ${IMAGE_NAME} ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG}
+                        '
+                    """
                 }
             }
         }
 
         stage('Test Production') {
+            agent any
             steps {
-                sh '''
-                    curl -f http://${HOSTNAME_DEPLOY_PROD}
-                '''
+                sh """
+                    curl -f http://${HOSTNAME_DEPLOY_PROD} || (echo "Production test failed" && exit 1)
+                """
             }
         }
     }
 
     post {
         success {
-            echo "Pipeline succeeded"
+            slackSend(
+                channel: '#jenkins-notification2026',
+                color: 'good',
+                message: "Build SUCCESSFUL: ${env.JOB_NAME} - #${env.BUILD_NUMBER}",
+                tokenCredentialId: 'slack-token'
+            )
         }
-
         failure {
-            echo "Pipeline failed"
+            slackSend(
+                channel: '#jenkins-notification2026',
+                color: 'danger',
+                message: "Build FAILED: ${env.JOB_NAME} - #${env.BUILD_NUMBER}",
+                tokenCredentialId: 'slack-token'
+            )
         }
     }
 }

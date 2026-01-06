@@ -19,21 +19,29 @@ pipeline {
     stages {
 
         stage('Checkout source') {
-            agent any
-            steps {
-                checkout([$class: 'GitSCM',
-                    branches: [[name: '*/main']],
-                    userRemoteConfigs: [[url: 'https://github.com/yannick0405/PayMyBuddy.git']]
-                ])
-            }
-        }
+    steps {
+        // Repo Jenkins (celui avec Jenkinsfile)
+        checkout scm
 
-        stage('Build JAR with Maven Wrapper') {
-            agent any
-            steps {
-                sh './mvnw clean package -DskipTests'
-            }
+        // Repo application
+        dir('paymybuddy') {
+            git branch: 'main',
+                url: 'https://github.com/yannick0405/PayMyBuddy.git'
         }
+    }
+}
+
+       stage('Build JAR with Maven Wrapper') {
+    agent any
+    steps {
+        dir('paymybuddy') {
+            sh '''
+                chmod +x mvnw
+                ./mvnw clean package -DskipTests
+            '''
+        }
+    }
+}
 
         stage('Build Docker Image') {
             agent any
@@ -123,12 +131,8 @@ pipeline {
         }
     }
 
-    post {
-        success {
-            slackSend(channel: '#jenkins-notification2026', color: 'good', message: "Pipeline PayMyBuddy réussie ✅", tokenCredentialId: 'slack-webhook')
-        }
-        failure {
-            slackSend(channel: '#jenkins-notification2026', color: 'danger', message: "Pipeline PayMyBuddy échouée ❌", tokenCredentialId: 'slack-webhook')
-        }
+   post {
+    failure {
+        echo "Build failed"
     }
 }

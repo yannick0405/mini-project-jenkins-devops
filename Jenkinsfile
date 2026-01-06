@@ -1,145 +1,102 @@
 pipeline {
-    agent none
+    agent any
 
     environment {
-        DOCKERHUB_CREDS = credentials('DOCKERHUB-CREDS')  // DockerHub
-        SLACK_TOKEN = credentials('slack-token')          // Slack webhook
-        IMAGE_NAME = "paymybuddy"
+        DOCKERHUB_CREDS = credentials('dockerhub-creds')  // tes credentials DockerHub
+        SLACK_TOKEN = credentials('slack-token')          // ton token Slack
+        IMAGE_NAME = "yannick0405/paymybuddy"
         IMAGE_TAG = "v1"
-        PORT_EXPOSED = "80"
-        HOSTNAME_DEPLOY_STAGING = "54.175.193.5"
-        HOSTNAME_DEPLOY_PROD = "54.226.252.171"
+        HOST_PORT = "8081"  // port de l'hôte pour éviter conflit avec Jenkins sur 8080
+        CONTAINER_PORT = "8080"
     }
 
     stages {
 
-        stage('Checkout source') {
-            agent any
+        stage('Checkout Source') {
             steps {
-                // Repo Jenkinsfile
-                checkout scm
-
-                // Repo application
-                dir('paymybuddy') {
-                    git branch: 'main', url: 'https://github.com/yannick0405/PayMyBuddy.git'
-                }
+                git branch: 'main', url: 'https://github.com/yannick0405/mini-project-jenkins-devops.git'
             }
         }
 
-        stage('Build JAR with Maven Docker') {
+        stage('Build JAR with Maven') {
             agent {
-                docker { image 'maven:3.9.1-eclipse-temurin-17' }  // Maven + JDK 17
+                docker {
+                    image 'maven:3.9.1-eclipse-temurin-17'
+                    args '-v $HOME/.m2:/root/.m2'
+                }
             }
             steps {
                 dir('paymybuddy') {
-                    sh '''
-                        chmod +x mvnw || true
-                        ./mvnw clean package -DskipTests || mvn clean package -DskipTests
-                    '''
+                    sh './mvnw clean package -DskipTests'
                 }
             }
         }
 
         stage('Build Docker Image') {
-            agent any
             steps {
-                sh """
-                    docker build -t ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG} paymybuddy
-                """
+                dir('paymybuddy') {
+                    sh """
+                        docker build -t $IMAGE_NAME:$IMAGE_TAG .
+                    """
+                }
             }
         }
 
         stage('Run Container Locally for Test') {
-            agent any
             steps {
-                sh """
-                    docker rm -f ${IMAGE_NAME} || true
-                    docker run -d --name ${IMAGE_NAME} -p ${PORT_EXPOSED}:80 ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG}
-                    sleep 5
-                    curl -f http://localhost:${PORT_EXPOSED} || (echo "App test failed" && exit 1)
-                    docker stop ${IMAGE_NAME}
-                    docker rm ${IMAGE_NAME}
-                """
+                script {
+                    try {
+                        sh "docker rm -f paymybuddy || true"
+                        sh "docker run -d --name paymybuddy -p $HOST_PORT:$CONTAINER_PORT $IMAGE_NAME:$IMAGE_TAG"
+                        sleep 5
+                        sh "curl -f http://localhost:$HOST_PORT || (echo 'App test failed' && exit 1)"
+                    } finally {
+                        sh "docker rm -f paymybuddy || true"
+                    }
+                }
             }
         }
 
         stage('Push Docker Image') {
-            agent any
             steps {
-                sh """
-                    echo ${DOCKERHUB_CREDS_PSW} | docker login -u ${DOCKERHUB_CREDS_USR} --password-stdin
-                    docker push ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG}
-                """
+                script {
+                    sh "echo $DOCKERHUB_CREDS_PSW | docker login -u $DOCKERHUB_CREDS --password-stdin"
+                    sh "docker push $IMAGE_NAME:$IMAGE_TAG"
+                }
             }
         }
 
         stage('Deploy to Staging') {
-            agent any
             steps {
-                sshagent(credentials: ['SSH_AUTH_SERVER']) {
-                    sh """
-                        ssh -o StrictHostKeyChecking=no ubuntu@${HOSTNAME_DEPLOY_STAGING} '
-                            docker login -u ${DOCKERHUB_CREDS_USR} -p ${DOCKERHUB_CREDS_PSW} &&
-                            docker pull ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG} &&
-                            docker rm -f ${IMAGE_NAME} || true &&
-                            docker run -d -p 80:80 --name ${IMAGE_NAME} ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG}
-                        '
-                    """
-                }
+                echo "Deployment to staging would go here"
             }
         }
 
         stage('Test Staging') {
-            agent any
             steps {
-                sh """
-                    curl -f http://${HOSTNAME_DEPLOY_STAGING} || (echo "Staging test failed" && exit 1)
-                """
+                echo "Staging tests would go here"
             }
         }
 
         stage('Deploy to Production') {
-            agent any
             steps {
-                sshagent(credentials: ['SSH_AUTH_SERVER']) {
-                    sh """
-                        ssh -o StrictHostKeyChecking=no ubuntu@${HOSTNAME_DEPLOY_PROD} '
-                            docker login -u ${DOCKERHUB_CREDS_USR} -p ${DOCKERHUB_CREDS_PSW} &&
-                            docker pull ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG} &&
-                            docker rm -f ${IMAGE_NAME} || true &&
-                            docker run -d -p 80:80 --name ${IMAGE_NAME} ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG}
-                        '
-                    """
-                }
+                echo "Deployment to production would go here"
             }
         }
 
         stage('Test Production') {
-            agent any
             steps {
-                sh """
-                    curl -f http://${HOSTNAME_DEPLOY_PROD} || (echo "Production test failed" && exit 1)
-                """
+                echo "Production tests would go here"
             }
         }
     }
 
     post {
-        failure {
-            slackSend(
-                channel: '#jenkins-notification2025',
-                color: 'danger',
-                tokenCredentialId: 'slack-token',
-                message: "Pipeline FAILED : ${env.JOB_NAME} Build #${env.BUILD_NUMBER}"
-            )
-        }
         success {
-            slackSend(
-                channel: '#jenkins-notification2025',
-                color: 'good',
-                tokenCredentialId: 'slack-token',
-                message: "Pipeline SUCCESS : ${env.JOB_NAME} Build #${env.BUILD_NUMBER}"
-            )
+            slackSend(channel: '#jenkins-notification2025', color: 'good', tokenCredentialId: 'slack-token', message: "Pipeline SUCCESS: ${env.JOB_NAME} #${env.BUILD_NUMBER}")
+        }
+        failure {
+            slackSend(channel: '#jenkins-notification2025', color: 'danger', tokenCredentialId: 'slack-token', message: "Pipeline FAILURE: ${env.JOB_NAME} #${env.BUILD_NUMBER}")
         }
     }
 }

@@ -2,16 +2,13 @@ pipeline {
     agent none
 
     environment {
-        // Credentials Jenkins
-        DOCKERHUB_CREDS = credentials('DOCKERHUB-CREDS')  // ID de ton credential DockerHub
-        SLACK_TOKEN = credentials('slack-webhook')         // ID de ton credential Slack
+        DOCKERHUB_CREDS = credentials('DOCKERHUB-CREDS')
+        SLACK_TOKEN = credentials('slack-webhook')
 
-        // Variables du projet
         IMAGE_NAME = "paymybuddy"
         IMAGE_TAG = "v1"
         PORT_EXPOSED = "80"
 
-        // Hôtes de déploiement
         HOSTNAME_DEPLOY_STAGING = "54.175.193.5"
         HOSTNAME_DEPLOY_PROD = "54.226.252.171"
     }
@@ -19,34 +16,32 @@ pipeline {
     stages {
 
         stage('Checkout source') {
-    steps {
-        // Repo Jenkins (celui avec Jenkinsfile)
-        checkout scm
+            steps {
+                checkout scm
 
-        // Repo application
-        dir('paymybuddy') {
-            git branch: 'main',
-                url: 'https://github.com/yannick0405/PayMyBuddy.git'
+                dir('paymybuddy') {
+                    git branch: 'main',
+                        url: 'https://github.com/yannick0405/PayMyBuddy.git'
+                }
+            }
         }
-    }
-}
 
-       stage('Build JAR with Maven Wrapper') {
-    agent any
-    steps {
-        dir('paymybuddy') {
-            sh '''
-                chmod +x mvnw
-                ./mvnw clean package -DskipTests
-            '''
+        stage('Build JAR with Maven Wrapper') {
+            agent any
+            steps {
+                dir('paymybuddy') {
+                    sh '''
+                        chmod +x mvnw
+                        ./mvnw clean package -DskipTests
+                    '''
+                }
+            }
         }
-    }
-}
 
         stage('Build Docker Image') {
             agent any
             steps {
-                script {
+                dir('paymybuddy') {
                     sh """
                         docker build -t ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG} .
                     """
@@ -61,7 +56,7 @@ pipeline {
                     docker rm -f ${IMAGE_NAME} || true
                     docker run -d --name ${IMAGE_NAME} -p ${PORT_EXPOSED}:80 ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG}
                     sleep 5
-                    curl -f http://localhost:${PORT_EXPOSED} || (echo "App test failed" && exit 1)
+                    curl -f http://localhost:${PORT_EXPOSED} || exit 1
                     docker stop ${IMAGE_NAME}
                     docker rm ${IMAGE_NAME}
                 """
@@ -71,12 +66,10 @@ pipeline {
         stage('Push Docker Image') {
             agent any
             steps {
-                script {
-                    sh """
-                        echo ${DOCKERHUB_CREDS_PSW} | docker login -u ${DOCKERHUB_CREDS_USR} --password-stdin
-                        docker push ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG}
-                    """
-                }
+                sh """
+                    echo ${DOCKERHUB_CREDS_PSW} | docker login -u ${DOCKERHUB_CREDS_USR} --password-stdin
+                    docker push ${DOCKERHUB_CREDS_USR}/${IMAGE_NAME}:${IMAGE_TAG}
+                """
             }
         }
 
@@ -99,9 +92,7 @@ pipeline {
         stage('Test Staging') {
             agent any
             steps {
-                sh """
-                    curl -f http://${HOSTNAME_DEPLOY_STAGING} || (echo "Staging test failed" && exit 1)
-                """
+                sh "curl -f http://${HOSTNAME_DEPLOY_STAGING}"
             }
         }
 
@@ -124,15 +115,14 @@ pipeline {
         stage('Test Production') {
             agent any
             steps {
-                sh """
-                    curl -f http://${HOSTNAME_DEPLOY_PROD} || (echo "Production test failed" && exit 1)
-                """
+                sh "curl -f http://${HOSTNAME_DEPLOY_PROD}"
             }
         }
     }
 
-   post {
-    failure {
-        echo "Build failed"
+    post {
+        failure {
+            echo "Build failed"
+        }
     }
 }

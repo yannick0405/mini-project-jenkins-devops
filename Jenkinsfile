@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     environment {
-        DOCKERHUB_CREDS = credentials('dockerhub-creds')  // tes credentials DockerHub
+        DOCKERHUB_CREDS = credentials('DOCKERHUB_CREDS')  // tes credentials DockerHub
         SLACK_TOKEN = credentials('slack-token')          // ton token Slack
         IMAGE_NAME = "yannick0405/paymybuddy"
         IMAGE_TAG = "v1"

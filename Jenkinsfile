@@ -146,21 +146,22 @@ pipeline {
     }
 
     post {
-        success {
-            slackSend(
-                channel: '#jenkins-notification2026',
-                color: 'good',
-                message: "Build SUCCESSFUL: ${env.JOB_NAME} - #${env.BUILD_NUMBER}",
-                tokenCredentialId: 'slack-token'
-            )
-        }
-        failure {
-            slackSend(
-                channel: '#jenkins-notification2026',
-                color: 'danger',
-                message: "Build FAILED: ${env.JOB_NAME} - #${env.BUILD_NUMBER}",
-                tokenCredentialId: 'slack-token'
-            )
-        }
+    success {
+        slackSend(
+            tokenCredentialId: 'slack-token',
+            channel: '#jenkins-notification2025',
+            color: 'good',
+            message: "Pipeline succeeded for ${JOB_NAME} #${BUILD_NUMBER}"
+        )
     }
+    failure {
+        slackSend(
+            tokenCredentialId: 'slack-token',
+            channel: '#jenkins-notification2025',
+            color: 'danger',
+            message: "Pipeline failed for ${JOB_NAME} #${BUILD_NUMBER}"
+        )
+    }
+}
+    
 }

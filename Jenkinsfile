@@ -15,16 +15,17 @@ pipeline {
 
     stages {
 
-        stage('Checkout source') {
-            steps {
-                checkout scm
+        ststage('Checkout source') {
+    agent any
+    steps {
+        checkout scm
 
-                dir('paymybuddy') {
-                    git branch: 'main',
-                        url: 'https://github.com/yannick0405/PayMyBuddy.git'
-                }
-            }
+        dir('paymybuddy') {
+            git branch: 'main',
+                url: 'https://github.com/yannick0405/PayMyBuddy.git'
         }
+    }
+}
 
         stage('Build JAR with Maven Wrapper') {
             agent any

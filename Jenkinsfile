@@ -1,24 +1,29 @@
 pipeline {
-    agent any
+    agent any 
 
     environment {
-        DOCKERHUB_CREDS = credentials('DOCKERHUB_CREDS')  // tes credentials DockerHub
-        SLACK_TOKEN = credentials('slack-token')          // ton token Slack
+        // Tes credentials
+        DOCKERHUB_CREDS = credentials('yann')
+        SLACK_TOKEN_ID = 'slack-token'
+        SONAR_TOKEN = credentials('sonar-token') // À créer dans Jenkins
+        
         IMAGE_NAME = "yannick0405/paymybuddy"
-        IMAGE_TAG = "v1"
-        HOST_PORT = "8081"  // port de l'hôte pour éviter conflit avec Jenkins sur 8080
-        CONTAINER_PORT = "8080"
+        IMAGE_TAG = "v${env.BUILD_NUMBER}"
+        
+        // Serveurs cibles
+        STAGING_IP = "44.211.85.128"
+        PROD_IP = "98.92.95.208"
     }
 
     stages {
-
         stage('Checkout Source') {
             steps {
-                git branch: 'main', url: 'https://github.com/yannick0405/mini-project-jenkins-devops.git'
+                // On récupère le code de l'application
+                git branch: 'main', url: 'https://github.com/yannick0405/PayMyBuddy.git'
             }
         }
 
-        stage('Build JAR with Maven') {
+        stage('Tests & SonarCloud') {
             agent {
                 docker {
                     image 'maven:3.9.1-eclipse-temurin-17'
@@ -27,76 +32,82 @@ pipeline {
             }
             steps {
                 dir('paymybuddy') {
-                    sh './mvnw clean package -DskipTests'
+                    echo "Exécution des tests unitaires..."
+                    sh './mvnw clean test'
+                    
+                    echo "Analyse SonarCloud..."
+                    // Remplace projectKey et organization par tes valeurs SonarCloud
+                    sh "export SONAR_TOKEN=${SONAR_TOKEN} && ./mvnw sonar:sonar -Dsonar.projectKey=paymybuddy-project -Dsonar.organization=yannick-org -Dsonar.host.url=https://sonarcloud.io"
                 }
             }
         }
 
-        stage('Build Docker Image') {
+        stage('Build & Push Docker') {
             steps {
                 dir('paymybuddy') {
-                    sh """
-                        docker build -t $IMAGE_NAME:$IMAGE_TAG .
-                    """
-                }
-            }
-        }
-
-        stage('Run Container Locally for Test') {
-            steps {
-                script {
-                    try {
-                        sh "docker rm -f paymybuddy || true"
-                        sh "docker run -d --name paymybuddy -p $HOST_PORT:$CONTAINER_PORT $IMAGE_NAME:$IMAGE_TAG"
-                        sleep 5
-                        sh "curl -f http://localhost:$HOST_PORT || (echo 'App test failed' && exit 1)"
-                    } finally {
-                        sh "docker rm -f paymybuddy || true"
-                    }
-                }
-            }
-        }
-
-        stage('Push Docker Image') {
-            steps {
-                script {
-                    sh "echo $DOCKERHUB_CREDS_PSW | docker login -u $DOCKERHUB_CREDS --password-stdin"
+                    echo "Compilation du JAR..."
+                    // On utilise un conteneur temporaire pour le build Maven
+                    sh "docker run --rm -v $HOME/.m2:/root/.m2 -v \$(pwd):/app -w /app maven:3.9.1-eclipse-temurin-17 ./mvnw package -DskipTests"
+                    
+                    echo "Build et Push de l'image..."
+                    sh "docker build -t $IMAGE_NAME:$IMAGE_TAG ."
+                    sh "echo $DOCKERHUB_CREDS_PSW | docker login -u $DOCKERHUB_CREDS_USR --password-stdin"
                     sh "docker push $IMAGE_NAME:$IMAGE_TAG"
                 }
             }
         }
 
-        stage('Deploy to Staging') {
+        // --- DÉPLOIEMENT SSH (BRANCH MAIN UNIQUEMENT) ---
+
+        stage('Deploy Staging') {
+            when { branch 'main' }
             steps {
-                echo "Deployment to staging would go here"
+                sshagent(['SSH_AUTH_SERVER']) {
+                    sh """
+                        ssh -o StrictHostKeyChecking=no ubuntu@${STAGING_IP} "
+                            docker pull ${IMAGE_NAME}:${IMAGE_TAG} && \
+                            docker rm -f paymybuddy-staging || true && \
+                            docker run -d --name paymybuddy-staging -p 8081:8080 ${IMAGE_NAME}:${IMAGE_TAG}
+                        "
+                    """
+                }
             }
         }
 
-        stage('Test Staging') {
+        stage('Deploy Production') {
+            when { branch 'main' }
             steps {
-                echo "Staging tests would go here"
+                // Validation manuelle optionnelle
+                input message: "Déployer en Production ?", ok: "Oui"
+                
+                sshagent(['SSH_AUTH_SERVER']) {
+                    sh """
+                        ssh -o StrictHostKeyChecking=no ubuntu@${PROD_IP} "
+                            docker pull ${IMAGE_NAME}:${IMAGE_TAG} && \
+                            docker rm -f paymybuddy-prod || true && \
+                            docker run -d --name paymybuddy-prod -p 80:8080 ${IMAGE_NAME}:${IMAGE_TAG}
+                        "
+                    """
+                }
             }
         }
 
-        stage('Deploy to Production') {
+        stage('Validation') {
+            when { branch 'main' }
             steps {
-                echo "Deployment to production would go here"
-            }
-        }
-
-        stage('Test Production') {
-            steps {
-                echo "Production tests would go here"
+                echo "Vérification du déploiement..."
+                sleep 10
+                sh "curl -f http://${PROD_IP}:80 || exit 1"
             }
         }
     }
 
     post {
         success {
-            slackSend(channel: '#jenkins-notification2025', color: 'good', tokenCredentialId: 'slack-token', message: "Pipeline SUCCESS: ${env.JOB_NAME} #${env.BUILD_NUMBER}")
+            slackSend(channel: '#jenkins-notification2025', color: 'good', tokenCredentialId: "${SLACK_TOKEN_ID}", message: "✅ SUCCESS: PayMyBuddy #${env.BUILD_NUMBER} déployé avec succès !")
         }
         failure {
-            slackSend(channel: '#jenkins-notification2025', color: 'danger', tokenCredentialId: 'slack-token', message: "Pipeline FAILURE: ${env.JOB_NAME} #${env.BUILD_NUMBER}")
+            slackSend(channel: '#jenkins-notification2025', color: 'danger', tokenCredentialId: "${SLACK_TOKEN_ID}", message: "❌ FAILURE: PayMyBuddy #${env.BUILD_NUMBER} a échoué.")
         }
     }
 }

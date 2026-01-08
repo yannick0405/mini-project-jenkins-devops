@@ -54,4 +54,6 @@ Pour fonctionner, le pipeline utilise les credentials Jenkins suivants :
     ![image](dockerhub.png)
 -   **Infrastructure :** Les scripts de déploiement sont opérationnels.
     ![image](pipeline-jenkins.png)
+
     > _Note : L'exécution finale du déploiement nécessite la présence du moteur Docker sur les instances cibles pour l'interprétation des commandes `docker pull` et `run`._
+> En raison du temps limité (2 heures) sur la plateforme DockerLabs d’Eazytraining, les notifications Slack n’ont pas été activées. Ainsi, aucune capture d’écran n’a pu être réalisée lorsque le pipeline est passé au vert. La configuration et le code ont néanmoins été correctement mis en place.

@@ -26,7 +26,7 @@ Le `Jenkinsfile` est structuré en plusieurs étapes clés :
     
 2.  **Tests & SonarCloud :** Exécution des tests unitaires et envoi du rapport d'analyse à SonarCloud (Project & Org Key: `yannick0405`).
     
-3.  **Build & Push Docker :** Compilation du JAR, création de l'image Docker taguée avec le numéro de build, et push sur DockerHub (`yannick0405/paymybuddy`).
+3.  **Build & Push Docker :** Compilation du JAR, création de l'image Docker taguée avec le numéro de build, et push sur DockerHub (`yannick0405/paymybuddy`).![image](dockerhub.png)
     
 4.  **Deploy Staging :** Déploiement automatique sur l'instance Staging via SSH.
     

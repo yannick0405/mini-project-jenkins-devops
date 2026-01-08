@@ -26,7 +26,7 @@ Le `Jenkinsfile` est structuré en plusieurs étapes clés :
     
 2.  **Tests & SonarCloud :** Exécution des tests unitaires et envoi du rapport d'analyse à SonarCloud (Project & Org Key: `yannick0405`).
     
-3.  **Build & Push Docker :** Compilation du JAR, création de l'image Docker taguée avec le numéro de build, et push sur DockerHub (`yannick0405/paymybuddy`).![image](dockerhub.png)
+3.  **Build & Push Docker :** Compilation du JAR, création de l'image Docker taguée avec le numéro de build, et push sur DockerHub (`yannick0405/paymybuddy`).
     
 4.  **Deploy Staging :** Déploiement automatique sur l'instance Staging via SSH.
     
@@ -49,9 +49,9 @@ Pour fonctionner, le pipeline utilise les credentials Jenkins suivants :
 ## 🚀 État actuel
 
 -   **Analyse SonarCloud :** Validée et réussie (Status: SUCCESS).
-    
+    ![image](sonartoken.png)
 -   **Artifacts Docker :** Image disponible sur DockerHub.
-    
+    ![image](dockerhub.png)
 -   **Infrastructure :** Les scripts de déploiement sont opérationnels.
-    
+    ![image](pipeline-jenkins.png)
     > _Note : L'exécution finale du déploiement nécessite la présence du moteur Docker sur les instances cibles pour l'interprétation des commandes `docker pull` et `run`._

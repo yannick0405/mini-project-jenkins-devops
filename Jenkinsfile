@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         DOCKERHUB_CREDS = credentials('yann')
-        SLACK_TOKEN_ID = 'slack-token'
+        SLACK_TOKEN_ID = 'slack-token' 
         SONAR_TOKEN = credentials('sonar-token') 
         
         IMAGE_NAME = "yannick0405/paymybuddy"
